@@ -1,30 +1,28 @@
 package com.library.literatura.menu;
 
 import com.library.literatura.models.*;
-import com.library.literatura.repository.BookRepository;
-import com.library.literatura.repository.PersonRepository;
-import com.library.literatura.service.APIFetcher;
-import com.library.literatura.service.DataConversor;
+import com.library.literatura.service.BookService;
+import com.library.literatura.service.PersonService;
+import org.springframework.stereotype.Component;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
+@Component
 public class Menu {
 
-    private Scanner scanner = new Scanner(System.in);
-    private APIFetcher apiFetcher = new APIFetcher();
-    private final String URL_BASE = "https://gutendex.com/books";
-    private DataConversor conversor = new DataConversor();
-    // private List<BookData> booksData = new ArrayList<>();
-    private BookRepository bookRepository;
-    private PersonRepository personRepository;
+    private final Scanner scanner;
+    private final BookService bookService;
+    private final PersonService personService;
+    private final MenuValidator validator;
 
-    public Menu(BookRepository bookRepository, PersonRepository personRepository ) {
-        this.bookRepository = bookRepository;
-        this.personRepository = personRepository;
+    public Menu(BookService bookService, PersonService personService) {
+        this.scanner = new Scanner(System.in);
+        this.bookService = bookService;
+        this.personService = personService;
+        this.validator = new MenuValidator();
     }
 
-    private void menu() {
+    private void displayMenu() {
         System.out.println("""
                     **************************************
                     Elija la opción a través de su número:
@@ -40,131 +38,153 @@ public class Menu {
 
     public void show() {
         boolean exit = false;
+        System.out.println("¡Bienvenido a Literatura!");
+        
         while (!exit) {
-            menu();
+            displayMenu();
             try {
-                int option = scanner.nextInt();
-                scanner.nextLine();
-                optionMenu(option);
-                if (option == 0 ) exit = true;
-            } catch (InputMismatchException e) {
-                System.out.println("\nError: entrada no válida. Intenta de nuevo.");
-                scanner.next();
+                int option = validator.getValidIntegerInput(scanner, "Seleccione una opción: ", 0, 5);
+                exit = executeOption(option);
+            } catch (Exception e) {
+                System.out.println("Error inesperado: " + e.getMessage());
+                System.out.println("Intente nuevamente.");
             }
         }
+        
+        System.out.println("¡Gracias por usar Literatura!");
+        scanner.close();
     }
 
-    private void optionMenu(int option) {
+    private boolean executeOption(int option) {
         switch (option) {
-            case 1:
-                getBookByTitle();
-                break;
-            case 2:
-                getRegistedBooks();
-                break;
-            case 3:
-                getPersons();
-                break;
-            case 4:
-                getPersonsByYear();
-                break;
-            case 5:
-                getBooksByLanguage();
-                break;
-            case 0:
+            case 1 -> searchBookByTitle();
+            case 2 -> listRegisteredBooks();
+            case 3 -> listAuthors();
+            case 4 -> listAuthorsByYear();
+            case 5 -> listBooksByLanguage();
+            case 0 -> {
                 System.out.println("Cerrando la aplicación...");
-                break;
-            default:
-                System.out.println("Opción inválida");
+                return true;
+            }
+            default -> System.out.println("Opción inválida");
+        }
+        return false;
+    }
+
+    private void searchBookByTitle() {
+        try {
+            String bookTitle = validator.getValidStringInput(scanner, "Escribe el nombre del libro que deseas buscar: ");
+            
+            // Check if book already exists
+            Optional<Book> existingBook = bookService.findBookByTitle(bookTitle);
+            if (existingBook.isPresent()) {
+                System.out.println("El libro '" + existingBook.get().getTitle() + "' ya existe en la base de datos.");
+                System.out.println("No se puede registrar el mismo libro más de una vez.");
+                System.out.println(existingBook.get());
+                return;
+            }
+
+            System.out.println("Libro no encontrado en base de datos, buscando en internet...");
+            
+            Optional<Book> newBook = bookService.searchAndSaveBook(bookTitle);
+            if (newBook.isPresent()) {
+                System.out.println("¡Libro encontrado y registrado exitosamente!");
+                System.out.println(newBook.get());
+            } else {
+                System.out.println("Lo sentimos, no hemos encontrado el libro '" + bookTitle + "'.");
+                System.out.println("Intente con un título diferente o más específico.");
+            }
+        } catch (Exception e) {
+            System.out.println("Error al buscar el libro: " + e.getMessage());
         }
     }
 
-    private Optional<BookData> getBookData(String bookTitle) {
-        var json = apiFetcher.getData(URL_BASE + "?search=" + bookTitle.toLowerCase().replace(" ", "+"));
-        Response data = conversor.getData(json, Response.class);
-        List<BookData> books = conversor.getData(json, Response.class).books();
-
-        return books.stream()
-                .filter(b -> b.title().toLowerCase().contains(bookTitle.toLowerCase()))
-                .findFirst();
-    }
-
-    private void getBookByTitle() {
-        System.out.println("Escribe el nombre del libro que deseas buscar");
-        String bookTitle = scanner.nextLine();
-        Optional<Book> bookFromDB = bookRepository.findByTitleContainsIgnoreCase(bookTitle);
-
-        if (bookFromDB.isPresent()) {
-            System.out.println("El libro " + bookFromDB.get().getTitle() + " ya existe.");
-            System.out.println("No se puede registrar el mismo libro más de una vez");
-            System.out.println(bookFromDB.get());
-            return;
+    private void listRegisteredBooks() {
+        try {
+            List<Book> books = bookService.getAllBooks();
+            if (books.isEmpty()) {
+                System.out.println("No hay libros registrados en la base de datos.");
+                System.out.println("Pruebe buscar algunos libros primero.");
+            } else {
+                System.out.println("\n=== LIBROS REGISTRADOS ===");
+                books.forEach(System.out::println);
+                System.out.println("Total de libros: " + books.size());
+            }
+        } catch (Exception e) {
+            System.out.println("Error al obtener la lista de libros: " + e.getMessage());
         }
+    }
 
-        System.out.println("Libro no está en base de datos, buscando en internet...");
-        Optional<BookData> bookFromApi = getBookData(bookTitle);
-        if (bookFromApi.isPresent())  {
-            System.out.println("Libro encontrado, registrando...");
-            List<Person> persons = bookFromApi.get().authors().stream()
-                    .map(a -> personRepository.findByNameContainsIgnoreCase(a.name())
-                            .orElseGet(() -> personRepository.save(new Person(Collections.singletonList(a)))))
-                    .collect(Collectors.toList());
-
-            Book newBook = new Book(bookFromApi.get(),persons);
-            bookRepository.save(newBook);
-            System.out.println(newBook);
-            return;
+    private void listAuthors() {
+        try {
+            List<Person> authors = personService.getAllPersons();
+            if (authors.isEmpty()) {
+                System.out.println("No hay autores registrados en la base de datos.");
+                System.out.println("Los autores se registran automáticamente al buscar libros.");
+            } else {
+                System.out.println("\n=== AUTORES REGISTRADOS ===");
+                authors.forEach(System.out::println);
+                System.out.println("Total de autores: " + authors.size());
+            }
+        } catch (Exception e) {
+            System.out.println("Error al obtener la lista de autores: " + e.getMessage());
         }
-
-        System.out.println("No hemos encontrado el libro");
     }
 
-    private void getRegistedBooks() {
-        List<Book> books = bookRepository.findAll();
-        books.forEach(System.out::println);
-    }
-
-    private void getPersons() {
-        List<Person> persons = personRepository.findAll();
-        persons.forEach(System.out::println);
-    }
-
-    private void getPersonsByYear() {
-        System.out.println("Ingrese el año para buscar autores vivos en determinado año: ");
-        int year = scanner.nextInt();
-        scanner.nextLine();
-
-        List<Person> person = personRepository.filterPersonsByYear(year);
-        if (!person.isEmpty()) {
-            person.forEach(System.out::println);
-            return;
+    private void listAuthorsByYear() {
+        try {
+            int year = validator.getValidIntegerInput(scanner, 
+                "Ingrese el año para buscar autores vivos: ", 1, 2024);
+            
+            List<Person> authorsAlive = personService.getPersonsAliveInYear(year);
+            if (authorsAlive.isEmpty()) {
+                System.out.println("No se encontraron autores vivos en el año " + year + ".");
+            } else {
+                System.out.println("\n=== AUTORES VIVOS EN " + year + " ===");
+                authorsAlive.forEach(System.out::println);
+                System.out.println("Total de autores encontrados: " + authorsAlive.size());
+            }
+        } catch (Exception e) {
+            System.out.println("Error al buscar autores por año: " + e.getMessage());
         }
-        System.out.println("No se han encontrado autores en ese periodo");
     }
 
-    private void getBooksByLanguage() {
-        List<String> languages = List.of("es", "en", "fr", "pt");
-        System.out.println("""
-                Ingrese el idioma para buscar los libros:
-                es - Español
-                en - Inglés
-                fr - Francés
-                pt - Portugues
-                """);
-        String language = scanner.nextLine();
-
-        while (!languages.contains(language)) {
-            System.out.println("Opción invalida, ingresa un idioma de la lista: ");
-            language = scanner.nextLine();
+    private void listBooksByLanguage() {
+        try {
+            List<String> validLanguages = List.of("es", "en", "fr", "pt");
+            
+            System.out.println("""
+                    Idiomas disponibles:
+                    es - Español
+                    en - Inglés
+                    fr - Francés
+                    pt - Português
+                    """);
+            
+            String language = validator.getValidLanguageInput(scanner, validLanguages);
+            
+            List<Book> books = bookService.getBooksByLanguage(language);
+            if (books.isEmpty()) {
+                String languageName = getLanguageName(language);
+                System.out.println("No se encontraron libros en " + languageName + ".");
+            } else {
+                String languageName = getLanguageName(language);
+                System.out.println("\n=== LIBROS EN " + languageName.toUpperCase() + " ===");
+                books.forEach(System.out::println);
+                System.out.println("Total de libros encontrados: " + books.size());
+            }
+        } catch (Exception e) {
+            System.out.println("Error al buscar libros por idioma: " + e.getMessage());
         }
-        List<Book> book = bookRepository.filterBooksByLanguage(language);
-
-        if (!book.isEmpty()) {
-            book.forEach(System.out::println);
-            return;
-        }
-
-        System.out.println("No se encontrar libros con ese idioma");
     }
-
+    
+    private String getLanguageName(String code) {
+        return switch (code) {
+            case "es" -> "Español";
+            case "en" -> "Inglés";
+            case "fr" -> "Francés";
+            case "pt" -> "Português";
+            default -> code;
+        };
+    }
 }
