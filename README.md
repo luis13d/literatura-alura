@@ -15,7 +15,7 @@ La aplicación usa PostgreSQL 15.3 como base de datos y se puede ejecutar fácil
 Clone el repositorio en su máquina local:
 
 ```bash
-git clone https://github.com/Alunizar23/literatura.git
+[git clone https://github.com/luis13d/literatura-alura.git]
 cd literatura
 ```
 
